@@ -54,8 +54,11 @@ label{display:flex;align-items:center;gap:6px;font-size:14px}
   <button id="sil" class="sec" disabled>✂️ Cắt im lặng: Tắt</button>
   <button id="bg" class="sec" disabled>🧑‍🎤 Xóa nền: Tắt</button>
   <button id="tt" class="sec">🏷️ Tựa đề: Tắt</button>
-  <button id="rb" disabled>Bắt đầu quay</button>
-  <button id="dl" class="sec" disabled>Lưu video</button>
+  <button id="rb" disabled>⏺ Bắt đầu quay</button>
+  <button id="pb" class="sec" disabled>⏸ Tạm dừng</button>
+  <button id="sb" class="sec" disabled>⏹ Dừng và lưu</button>
+  <button id="dl" class="sec" disabled>Lưu lại</button>
+  <button id="sh" class="sec" disabled>📤 Chia sẻ / Thư viện</button>
 </div>
 <div id="msg"></div>
 
@@ -145,7 +148,7 @@ function drawSubs(g,W,H){
 }
 function drawTitle(g,W,H){
   const txt=$('title').value.trim();if(!txt)return;
-  if($('ttmode').value==='5'&&live&&Date.now()-t0>5000)return;
+  if($('ttmode').value==='5'&&live&&recMs>5000)return;
   const size=Math.round(W*0.05);
   g.font='bold '+size+'px system-ui,sans-serif';g.textAlign='center';g.textBaseline='middle';
   const L=wrap(g,txt,W*0.9).slice(0,2),lh=size*1.3,h=L.length*lh+size*0.5,top=H*0.04;
@@ -234,14 +237,14 @@ function silCheck(){
   let sum=0;for(let i=0;i<buf.length;i++){const x=(buf[i]-128)/128;sum+=x*x}
   const level=Math.sqrt(sum/buf.length),thr=parseFloat($('thr').value),now=Date.now();
   $('lvl').textContent='Mức tiếng hiện tại: '+level.toFixed(3)+(level>thr?' (có tiếng)':' (im lặng)');
-  if(!live||!silOn||!rec)return;
+  if(!live||!silOn||!rec||manualPause)return;
   if(level>thr){lastLoud=now;if(rec.state==='paused')rec.resume()}
   else if(rec.state==='recording'&&now-lastLoud>800)rec.pause();
 }
 $('sil').onclick=()=>{
   silOn=!silOn;
   $('sil').textContent='✂️ Cắt im lặng: '+(silOn?'Bật':'Tắt');$('sil').className=silOn?'on':'sec';
-  if(!silOn&&rec&&rec.state==='paused')rec.resume();
+  if(!silOn&&rec&&rec.state==='paused'&&!manualPause)rec.resume();
   say(silOn?'Khi quay, app tạm dừng ghi lúc im lặng và ghi tiếp khi có tiếng. Chỉnh ngưỡng nếu cắt sai.':'Đã tắt cắt im lặng.');
 };
 let bgOn=false,ttOn=false,seg=null,segBusy=false,bgImg=null,bgVid=null,hasComp=false,fromCanvas=false;
@@ -349,31 +352,71 @@ if(navigator.mediaDevices&&navigator.mediaDevices.addEventListener)navigator.med
 $('start').onclick=openCam;
 $('flip').onclick=()=>{if(live){say('Hãy dừng quay trước khi đổi camera.');return}facing=facing==='user'?'environment':'user';openCam()};
 
-$('rb').onclick=()=>{
-  if(!live){
-    chunks=[];blobOut=null;$('dl').disabled=true;
-    let src=stream;
-    fromCanvas=$('burn').checked||bgOn||ttOn;
-    if(fromCanvas){src=rc.captureStream(30);stream.getAudioTracks().forEach(t=>src.addTrack(t))}
-    const mt=['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4;codecs=avc1','video/webm;codecs=vp9,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m))||'';
-    rec=new MediaRecorder(src,mt?{mimeType:mt}:{});
-    rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
-    rec.onstop=()=>{blobOut=new Blob(chunks,{type:rec.mimeType||'video/webm'});$('dl').disabled=false;say('Đã quay xong, bấm "Lưu video".')};
-    rec.start(1000);live=true;t0=Date.now();lastLoud=Date.now();
-    $('rb').textContent='Dừng quay';$('rec').style.display='block';
-    tick=setInterval(()=>{const s=Math.floor((Date.now()-t0)/1000);$('rec').textContent=(rec&&rec.state==='paused'?'⏸ CẮT ':'● REC ')+String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')},500);
+let manualPause=false,recMs=0,lastTick=0,lastName='';
+const pad=n=>String(n).padStart(2,'0');
+function setRecUI(){
+  $('rb').disabled=live||!stream;$('pb').disabled=!live;$('sb').disabled=!live;
+  $('pb').textContent='⏸ Tạm dừng';$('pb').className='sec';
+  $('rec').style.display=live?'block':'none';
+}
+function saveFile(auto){
+  if(!blobOut)return;
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blobOut);a.download=lastName;
+  document.body.appendChild(a);a.click();a.remove();
+  say((auto?'Đã tự lưu vào thư mục Tải xuống: ':'Đã lưu: ')+lastName+'. Bấm "Chia sẻ / Thư viện" để đưa vào Thư viện hoặc gửi đi.');
+}
+function startRec(){
+  if(live||!stream)return;
+  chunks=[];blobOut=null;$('dl').disabled=true;$('sh').disabled=true;
+  let src=stream;
+  fromCanvas=$('burn').checked||bgOn||ttOn;
+  if(fromCanvas){src=rc.captureStream(30);stream.getAudioTracks().forEach(t=>src.addTrack(t))}
+  const mt=['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4;codecs=avc1','video/webm;codecs=vp9,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m))||'';
+  rec=new MediaRecorder(src,mt?{mimeType:mt}:{});
+  rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  rec.onstop=()=>{
+    blobOut=new Blob(chunks,{type:rec.mimeType||'video/webm'});
+    const ext=blobOut.type.includes('mp4')?'mp4':'webm';
+    lastName='quay-phim-'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+'.'+ext;
+    $('dl').disabled=false;$('sh').disabled=false;
+    saveFile(true);
+  };
+  rec.start(1000);live=true;manualPause=false;recMs=0;lastTick=Date.now();t0=Date.now();lastLoud=Date.now();
+  setRecUI();say('');
+  tick=setInterval(()=>{
+    const now=Date.now();
+    if(rec&&rec.state==='recording')recMs+=now-lastTick;
+    lastTick=now;
+    const s=Math.floor(recMs/1000),paused=rec&&rec.state==='paused';
+    $('rec').textContent=(paused?(manualPause?'⏸ TẠM DỪNG ':'⏸ CẮT '):'● REC ')+pad(Math.floor(s/60))+':'+pad(s%60);
+  },250);
+}
+function stopRec(){
+  if(!live||!rec)return;
+  rec.stop();live=false;manualPause=false;clearInterval(tick);
+  setRecUI();
+}
+$('rb').onclick=startRec;
+$('sb').onclick=stopRec;
+$('pb').onclick=()=>{
+  if(!live||!rec)return;
+  if(!manualPause){
+    manualPause=true;if(rec.state==='recording')rec.pause();
+    $('pb').textContent='▶ Tiếp tục';$('pb').className='on';
   }else{
-    rec.stop();live=false;clearInterval(tick);
-    $('rb').textContent='Bắt đầu quay';$('rec').style.display='none';
+    manualPause=false;rec.resume();lastLoud=Date.now();
+    $('pb').textContent='⏸ Tạm dừng';$('pb').className='sec';
   }
 };
-$('dl').onclick=()=>{
+$('dl').onclick=()=>saveFile(false);
+$('sh').onclick=async()=>{
   if(!blobOut)return;
-  const ext=blobOut.type.includes('mp4')?'mp4':'webm';
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blobOut);
-  a.download='quay-phim-'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+'.'+ext;
-  document.body.appendChild(a);a.click();a.remove();
+  const f=new File([blobOut],lastName,{type:lastName.endsWith('mp4')?'video/mp4':'video/webm'});
+  try{
+    if(navigator.canShare&&navigator.canShare({files:[f]}))await navigator.share({files:[f],title:'Video quay'});
+    else say('Trình duyệt trên máy này không cho chia sẻ file. Hãy dùng file trong thư mục Tải xuống.');
+  }catch(err){if(err.name!=='AbortError')say('Không chia sẻ được: '+(err.message||err.name))}
 };
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))}
 </script>
