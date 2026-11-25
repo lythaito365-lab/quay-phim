@@ -51,6 +51,9 @@ label{display:flex;align-items:center;gap:6px;font-size:14px}
   <button id="start">Bật camera</button>
   <button id="flip" class="sec" disabled>Đổi camera</button>
   <button id="lock" class="sec" disabled>🔓 Khóa sáng</button>
+  <button id="sil" class="sec" disabled>✂️ Cắt im lặng: Tắt</button>
+  <button id="bg" class="sec" disabled>🧑‍🎤 Xóa nền: Tắt</button>
+  <button id="tt" class="sec">🏷️ Tựa đề: Tắt</button>
   <button id="rb" disabled>Bắt đầu quay</button>
   <button id="dl" class="sec" disabled>Lưu video</button>
 </div>
@@ -80,6 +83,16 @@ label{display:flex;align-items:center;gap:6px;font-size:14px}
   <div class="row" style="margin:0">
     <label><input type="checkbox" id="burn" checked> Ghi phụ đề vào video</label>
     <label><input type="checkbox" id="listen" checked> Nhận dạng giọng nói</label>
+  </div>
+  <div style="margin-top:8px"><small>Ngưỡng tiếng khi cắt im lặng (cao hơn = cắt nhiều hơn, thấp hơn = nhạy hơn)</small><input type="range" id="thr" min="0.01" max="0.1" step="0.005" value="0.03" style="width:100%"><small id="lvl">Mức tiếng hiện tại: —</small></div>
+  <div class="row" style="margin:8px 0 0">
+    <div style="flex:2;min-width:180px"><small>Tựa đề video</small><input type="text" id="title" placeholder="Nhập tựa đề..."></div>
+    <div style="flex:1;min-width:120px"><small>Hiện tựa đề</small><select id="ttmode"><option value="all">Suốt video</option><option value="5">5 giây đầu</option></select></div>
+  </div>
+  <div class="row" style="margin:8px 0 0">
+    <div style="flex:1;min-width:120px"><small>Kiểu nền</small><select id="bgmode"><option value="blur">Làm mờ nền</option><option value="color">Màu đơn</option><option value="image">Ảnh nền</option><option value="video">Video nền</option></select></div>
+    <div><small>Màu nền</small><input type="color" id="bgcolor" value="#00b140" style="height:38px;width:60px;padding:0;border:0"></div>
+    <div style="flex:1;min-width:140px"><small>Ảnh hoặc video nền</small><input type="file" id="bgfile" accept="image/*,video/*" style="width:100%"></div>
   </div>
 </div>
 
@@ -115,27 +128,53 @@ function caption(){
   if(Date.now()-lastT>5000)return '';
   return ((finals[finals.length-1]||'')+' '+interim).trim().split(/\s+/).slice(-22).join(' ');
 }
-function wrap(text,max){
+const rc=document.createElement('canvas'),rctx=rc.getContext('2d');
+function wrap(g,text,max){
   const words=text.split(/\s+/),lines=[];let cur='';
-  for(const w of words){const t=cur?cur+' '+w:w;if(ctx.measureText(t).width>max&&cur){lines.push(cur);cur=w}else cur=t}
+  for(const w of words){const t=cur?cur+' '+w:w;if(g.measureText(t).width>max&&cur){lines.push(cur);cur=w}else cur=t}
   if(cur)lines.push(cur);return lines;
 }
+function drawSubs(g,W,H){
+  const txt=caption();if(!txt)return;
+  const size=Math.round(W*parseFloat($('fs').value)/100);
+  g.font='bold '+size+'px system-ui,sans-serif';g.textAlign='center';g.textBaseline='middle';
+  const L=wrap(g,txt,W*0.9).slice(-4),lh=size*1.3,h=L.length*lh+size*0.6,top=H-h-H*0.04;
+  g.fillStyle='rgba(0,0,0,.65)';g.fillRect(W*0.03,top,W*0.94,h);
+  g.fillStyle='#fff';L.forEach((l,i)=>g.fillText(l,W/2,top+size*0.3+lh*i+lh/2));
+}
+function drawTitle(g,W,H){
+  const txt=$('title').value.trim();if(!txt)return;
+  if($('ttmode').value==='5'&&live&&Date.now()-t0>5000)return;
+  const size=Math.round(W*0.05);
+  g.font='bold '+size+'px system-ui,sans-serif';g.textAlign='center';g.textBaseline='middle';
+  const L=wrap(g,txt,W*0.9).slice(0,2),lh=size*1.3,h=L.length*lh+size*0.5,top=H*0.04;
+  g.fillStyle='rgba(0,0,0,.6)';g.fillRect(W*0.03,top,W*0.94,h);
+  g.fillStyle='#fff';L.forEach((l,i)=>g.fillText(l,W/2,top+size*0.25+lh*i+lh/2));
+}
+function cover(g,el,w,h,W,H){const k=Math.max(W/w,H/h),dw=w*k,dh=h*k;g.drawImage(el,(W-dw)/2,(H-dh)/2,dw,dh)}
+function drawBg(g,W,H){
+  const m=$('bgmode').value;
+  if(m==='blur'){g.filter='blur(16px)';g.drawImage(v,0,0,W,H);g.filter='none'}
+  else if(m==='image'&&bgImg)cover(g,bgImg,bgImg.width,bgImg.height,W,H);
+  else if(m==='video'&&bgVid&&bgVid.readyState>=2&&bgVid.videoWidth)cover(g,bgVid,bgVid.videoWidth,bgVid.videoHeight,W,H);
+  else{g.fillStyle=m==='color'?$('bgcolor').value:'#000';g.fillRect(0,0,W,H)}
+}
 function draw(){
+  if(v.videoWidth&&(rc.width!==v.videoWidth||rc.height!==v.videoHeight)){rc.width=v.videoWidth;rc.height=v.videoHeight}
+  const W=rc.width,H=rc.height;
+  if(bgOn&&seg&&!segBusy&&v.videoWidth){segBusy=true;seg.send({image:v}).catch(()=>{}).finally(()=>{segBusy=false})}
   if(v.videoWidth){
-    if(c.width!==v.videoWidth||c.height!==v.videoHeight){c.width=v.videoWidth;c.height=v.videoHeight}
-    ctx.drawImage(v,0,0,c.width,c.height);
-  }else{ctx.fillStyle='#000';ctx.fillRect(0,0,c.width,c.height)}
-  const txt=caption();
-  if(txt){
-    const size=Math.round(c.width*parseFloat($('fs').value)/100);
-    ctx.font='bold '+size+'px system-ui,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
-    const L=wrap(txt,c.width*0.9).slice(-4),lh=size*1.3,h=L.length*lh+size*0.6,top=c.height-h-c.height*0.04;
-    ctx.fillStyle='rgba(0,0,0,.65)';ctx.fillRect(c.width*0.03,top,c.width*0.94,h);
-    ctx.fillStyle='#fff';L.forEach((l,i)=>ctx.fillText(l,c.width/2,top+size*0.3+lh*i+lh/2));
-  }
+    if(bgOn&&hasComp&&comp.width===W&&comp.height===H){drawBg(rctx,W,H);rctx.drawImage(comp,0,0,W,H)}
+    else rctx.drawImage(v,0,0,W,H);
+  }else{rctx.fillStyle='#000';rctx.fillRect(0,0,W,H)}
+  if(ttOn)drawTitle(rctx,W,H);
+  const burn=$('burn').checked;
+  if(burn)drawSubs(rctx,W,H);
+  if(c.width!==W||c.height!==H){c.width=W;c.height=H}
+  ctx.drawImage(rc,0,0);
+  if(!burn)drawSubs(ctx,W,H);
   requestAnimationFrame(draw);
 }
-
 function startSR(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR){say('Trình duyệt không hỗ trợ nhận dạng giọng nói, hãy dùng Chrome.');return}
@@ -171,13 +210,91 @@ async function openCam(){
       audio:{echoCancellation:true,noiseSuppression:true}
     });
     v.srcObject=stream;await v.play();
-    $('start').textContent='Camera đang bật';$('rb').disabled=false;$('flip').disabled=false;lockOn=false;$('lock').disabled=false;$('lock').textContent='🔓 Khóa sáng';$('lock').className='sec';
+    $('start').textContent='Camera đang bật';$('rb').disabled=false;$('flip').disabled=false;$('sil').disabled=false;$('bg').disabled=false;setupAudio();lockOn=false;$('lock').disabled=false;$('lock').textContent='🔓 Khóa sáng';$('lock').className='sec';
     if(!running){running=true;draw()}
     try{wake=await navigator.wakeLock?.request('screen')}catch(e){}
     say('');
     if($('listen').checked)startSR();
   }catch(e){say('Không mở được camera/micro: '+(e.message||e.name)+'. Trang cần chạy qua HTTPS và được cấp quyền.')}
 }
+let actx=null,an=null,silOn=false,lastLoud=0,silTimer=null,buf=null;
+function setupAudio(){
+  try{
+    actx&&actx.close();
+    actx=new (window.AudioContext||window.webkitAudioContext)();
+    const src=actx.createMediaStreamSource(new MediaStream(stream.getAudioTracks()));
+    an=actx.createAnalyser();an.fftSize=1024;src.connect(an);buf=new Uint8Array(an.fftSize);
+    clearInterval(silTimer);silTimer=setInterval(silCheck,60);
+  }catch(e){an=null}
+}
+function silCheck(){
+  if(!an)return;
+  an.getByteTimeDomainData(buf);
+  let sum=0;for(let i=0;i<buf.length;i++){const x=(buf[i]-128)/128;sum+=x*x}
+  const level=Math.sqrt(sum/buf.length),thr=parseFloat($('thr').value),now=Date.now();
+  $('lvl').textContent='Mức tiếng hiện tại: '+level.toFixed(3)+(level>thr?' (có tiếng)':' (im lặng)');
+  if(!live||!silOn||!rec)return;
+  if(level>thr){lastLoud=now;if(rec.state==='paused')rec.resume()}
+  else if(rec.state==='recording'&&now-lastLoud>800)rec.pause();
+}
+$('sil').onclick=()=>{
+  silOn=!silOn;
+  $('sil').textContent='✂️ Cắt im lặng: '+(silOn?'Bật':'Tắt');$('sil').className=silOn?'on':'sec';
+  if(!silOn&&rec&&rec.state==='paused')rec.resume();
+  say(silOn?'Khi quay, app tạm dừng ghi lúc im lặng và ghi tiếp khi có tiếng. Chỉnh ngưỡng nếu cắt sai.':'Đã tắt cắt im lặng.');
+};
+let bgOn=false,ttOn=false,seg=null,segBusy=false,bgImg=null,bgVid=null,hasComp=false,fromCanvas=false;
+const comp=document.createElement('canvas'),cctx=comp.getContext('2d');
+function loadScript(src){return new Promise((ok,no)=>{const e=document.createElement('script');e.src=src;e.onload=ok;e.onerror=()=>no(new Error('không tải được thư viện, kiểm tra internet'));document.head.appendChild(e)})}
+async function initSeg(){
+  if(seg)return;
+  const base='https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1.1675465747/';
+  await loadScript(base+'selfie_segmentation.js');
+  const sg=new SelfieSegmentation({locateFile:f=>base+f});
+  sg.setOptions({modelSelection:1,selfieMode:false});
+  sg.onResults(r=>{
+    const W=v.videoWidth,H=v.videoHeight;if(!W)return;
+    if(comp.width!==W||comp.height!==H){comp.width=W;comp.height=H}
+    cctx.save();cctx.clearRect(0,0,W,H);
+    cctx.filter='blur(2px)';cctx.drawImage(r.segmentationMask,0,0,W,H);cctx.filter='none';
+    cctx.globalCompositeOperation='source-in';cctx.drawImage(r.image,0,0,W,H);
+    cctx.restore();hasComp=true;
+  });
+  await sg.initialize();
+  seg=sg;
+}
+$('bg').onclick=async()=>{
+  if(live){say('Hãy bật hoặc tắt xóa nền trước khi bấm quay.');return}
+  if(!stream){say('Hãy bật camera trước.');return}
+  if(bgOn){bgOn=false;hasComp=false;$('bg').textContent='🧑‍🎤 Xóa nền: Tắt';$('bg').className='sec';say('Đã tắt xóa nền.');return}
+  const bm=$('bgmode').value;
+  if((bm==='image'&&!bgImg)||(bm==='video'&&!bgVid)){say('Hãy chọn ảnh hoặc video nền ở mục Ảnh hoặc video nền, hoặc chọn kiểu nền khác.');return}
+  say('Đang tải mô hình xóa nền (cần internet, lần đầu hơi lâu)...');
+  try{
+    await initSeg();bgOn=true;
+    $('bg').textContent='🧑‍🎤 Xóa nền: Bật';$('bg').className='on';
+    say('Đã bật xóa nền. Nếu hình bị giật, thử kiểu "Màu đơn" hoặc tắt bớt tính năng khác.');
+  }catch(e){say('Không bật được xóa nền: '+(e.message||e))}
+};
+$('bgfile').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  const url=URL.createObjectURL(f);
+  if(f.type.startsWith('video')){
+    const vd=document.createElement('video');
+    vd.muted=true;vd.loop=true;vd.playsInline=true;vd.src=url;
+    vd.onloadeddata=()=>{bgVid=vd;$('bgmode').value='video';vd.play().catch(()=>{});say('Đã nạp video nền (tiếng của video nền không được ghi).')};
+    vd.onerror=()=>say('Không đọc được video này, hãy thử file mp4 khác.');
+  }else{
+    const im=new Image();im.onload=()=>{bgImg=im;$('bgmode').value='image';say('Đã nạp ảnh nền.')};
+    im.src=url;
+  }
+};
+$('tt').onclick=()=>{
+  if(live){say('Hãy bật hoặc tắt tựa đề trước khi bấm quay.');return}
+  if(!ttOn&&!$('title').value.trim()){say('Hãy nhập tựa đề ở mục Tựa đề video trước.');return}
+  ttOn=!ttOn;$('tt').textContent='🏷️ Tựa đề: '+(ttOn?'Bật':'Tắt');$('tt').className=ttOn?'on':'sec';
+  say(ttOn?'Tựa đề sẽ được ghi vào video.':'Đã tắt tựa đề.');
+};
 let lockOn=false;
 async function setLock(on){
   const t=stream&&stream.getVideoTracks()[0];
@@ -217,14 +334,15 @@ $('rb').onclick=()=>{
   if(!live){
     chunks=[];blobOut=null;$('dl').disabled=true;
     let src=stream;
-    if($('burn').checked){src=c.captureStream(30);stream.getAudioTracks().forEach(t=>src.addTrack(t))}
+    fromCanvas=$('burn').checked||bgOn||ttOn;
+    if(fromCanvas){src=rc.captureStream(30);stream.getAudioTracks().forEach(t=>src.addTrack(t))}
     const mt=['video/mp4;codecs=avc1','video/webm;codecs=vp9,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m))||'';
     rec=new MediaRecorder(src,mt?{mimeType:mt}:{});
     rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
     rec.onstop=()=>{blobOut=new Blob(chunks,{type:rec.mimeType||'video/webm'});$('dl').disabled=false;say('Đã quay xong, bấm "Lưu video".')};
-    rec.start(1000);live=true;t0=Date.now();
+    rec.start(1000);live=true;t0=Date.now();lastLoud=Date.now();
     $('rb').textContent='Dừng quay';$('rec').style.display='block';
-    tick=setInterval(()=>{const s=Math.floor((Date.now()-t0)/1000);$('rec').textContent='● REC '+String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')},500);
+    tick=setInterval(()=>{const s=Math.floor((Date.now()-t0)/1000);$('rec').textContent=(rec&&rec.state==='paused'?'⏸ CẮT ':'● REC ')+String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0')},500);
   }else{
     rec.stop();live=false;clearInterval(tick);
     $('rb').textContent='Bắt đầu quay';$('rec').style.display='none';
