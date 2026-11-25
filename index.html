@@ -139,7 +139,7 @@ function startSR(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR){say('Trình duyệt không hỗ trợ nhận dạng giọng nói, hãy dùng Chrome.');return}
   try{sr&&(sr.onend=null,sr.abort())}catch(e){}
-  sr=new SR();sr.lang=$('lang').value;sr.continuous=true;sr.interimResults=true;
+  window.srStop=false;sr=new SR();sr.lang=$('lang').value;sr.continuous=true;sr.interimResults=true;
   sr.onresult=e=>{
     interim='';
     for(let i=e.resultIndex;i<e.results.length;i++){
@@ -152,8 +152,11 @@ function startSR(){
       if(target.length&&target.filter(w=>heard.has(w)).length/target.length>=0.6&&idx<sents.length-1)go(1);
     }
   };
-  sr.onend=()=>{if(stream&&stream.active&&$('listen').checked){try{sr.start()}catch(e){}}};
-  sr.onerror=e=>{if(e.error==='not-allowed'||e.error==='service-not-allowed')say('Chưa được cấp quyền nhận dạng giọng nói.')};
+  sr.onend=()=>{if(stream&&stream.active&&$('listen').checked&&!window.srStop){try{sr.start()}catch(e){}}};
+  sr.onerror=e=>{
+    const m={'not-allowed':'Chrome chưa cho trang dùng micro để nhận dạng (not-allowed).','service-not-allowed':'Máy chưa cho dùng dịch vụ nhận dạng giọng nói của Google (service-not-allowed).','audio-capture':'Micro đang bận, không nhận dạng được (audio-capture).','network':'Nhận dạng giọng nói cần có internet (network).','language-not-supported':'Ngôn ngữ này chưa được hỗ trợ (language-not-supported).'};
+    if(m[e.error]){window.srStop=(e.error!=='network');say(m[e.error]+' Quay phim vẫn hoạt động; chế độ kịch bản vẫn dùng được bằng cách chạm chuyển câu.')}
+  };
   try{sr.start()}catch(e){}
 }
 $('listen').onchange=()=>{if($('listen').checked&&stream)startSR();else try{sr&&(sr.onend=null,sr.abort())}catch(e){}};
