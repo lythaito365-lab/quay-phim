@@ -50,6 +50,7 @@ label{display:flex;align-items:center;gap:6px;font-size:14px}
 <div class="row">
   <button id="start">Bật camera</button>
   <button id="flip" class="sec" disabled>Đổi camera</button>
+  <button id="lock" class="sec" disabled>🔓 Khóa sáng</button>
   <button id="rb" disabled>Bắt đầu quay</button>
   <button id="dl" class="sec" disabled>Lưu video</button>
 </div>
@@ -170,13 +171,45 @@ async function openCam(){
       audio:{echoCancellation:true,noiseSuppression:true}
     });
     v.srcObject=stream;await v.play();
-    $('start').textContent='Camera đang bật';$('rb').disabled=false;$('flip').disabled=false;
+    $('start').textContent='Camera đang bật';$('rb').disabled=false;$('flip').disabled=false;lockOn=false;$('lock').disabled=false;$('lock').textContent='🔓 Khóa sáng';$('lock').className='sec';
     if(!running){running=true;draw()}
     try{wake=await navigator.wakeLock?.request('screen')}catch(e){}
     say('');
     if($('listen').checked)startSR();
   }catch(e){say('Không mở được camera/micro: '+(e.message||e.name)+'. Trang cần chạy qua HTTPS và được cấp quyền.')}
 }
+let lockOn=false;
+async function setLock(on){
+  const t=stream&&stream.getVideoTracks()[0];
+  if(!t||!t.getCapabilities){say('Trình duyệt không hỗ trợ khóa sáng.');return}
+  const caps=t.getCapabilities(),st=t.getSettings(),ok=[],no=[];
+  const apply=async(c)=>{try{await t.applyConstraints({advanced:[c]});return true}catch(e){return false}};
+  const has=(k,m)=>Array.isArray(caps[k])&&caps[k].includes(m);
+  if(on){
+    let e=false;
+    if(has('exposureMode','manual')&&st.exposureTime!=null){
+      const c={exposureMode:'manual',exposureTime:st.exposureTime};
+      if(st.iso!=null&&caps.iso)c.iso=st.iso;
+      e=await apply(c);
+    }
+    if(!e&&has('exposureMode','single-shot'))e=await apply({exposureMode:'single-shot'});
+    (e?ok:no).push('độ sáng');
+    let w=false;
+    if(has('whiteBalanceMode','manual')&&st.colorTemperature!=null)w=await apply({whiteBalanceMode:'manual',colorTemperature:st.colorTemperature});
+    if(!w&&has('whiteBalanceMode','single-shot'))w=await apply({whiteBalanceMode:'single-shot'});
+    (w?ok:no).push('cân bằng trắng');
+    if(!ok.length){say('Điện thoại/Chrome của bạn không cho khóa độ sáng bằng trình duyệt.');return}
+    lockOn=true;
+    say('Đã khóa: '+ok.join(', ')+(no.length?'. Máy không hỗ trợ khóa: '+no.join(', ')+'.':'.'));
+  }else{
+    if(has('exposureMode','continuous'))await apply({exposureMode:'continuous'});
+    if(has('whiteBalanceMode','continuous'))await apply({whiteBalanceMode:'continuous'});
+    lockOn=false;say('Đã mở khóa, camera tự điều chỉnh sáng trở lại.');
+  }
+  $('lock').textContent=lockOn?'🔒 Đã khóa sáng':'🔓 Khóa sáng';
+  $('lock').className=lockOn?'on':'sec';
+}
+$('lock').onclick=()=>setLock(!lockOn);
 $('start').onclick=openCam;
 $('flip').onclick=()=>{if(live){say('Hãy dừng quay trước khi đổi camera.');return}facing=facing==='user'?'environment':'user';openCam()};
 
