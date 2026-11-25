@@ -75,6 +75,7 @@ label{display:flex;align-items:center;gap:6px;font-size:14px}
 
 <div class="card">
   <small>Cài đặt</small>
+  <div style="margin-bottom:8px"><small>Micro</small><select id="mic"><option value="">Mặc định của máy</option></select></div>
   <div class="row" style="margin:0 0 8px">
     <div style="flex:1;min-width:140px"><small>Ngôn ngữ nhận dạng</small>
       <select id="lang"><option value="vi-VN">Tiếng Việt</option><option value="en-US">English</option></select></div>
@@ -207,15 +208,15 @@ async function openCam(){
     stream?.getTracks().forEach(t=>t.stop());
     stream=await navigator.mediaDevices.getUserMedia({
       video:{facingMode:facing,width:{ideal:1280},height:{ideal:720}},
-      audio:{echoCancellation:true,noiseSuppression:true}
+      audio:{echoCancellation:true,noiseSuppression:true,...($('mic').value?{deviceId:{exact:$('mic').value}}:{})}
     });
     v.srcObject=stream;await v.play();
     $('start').textContent='Camera đang bật';$('rb').disabled=false;$('flip').disabled=false;$('sil').disabled=false;$('bg').disabled=false;setupAudio();lockOn=false;$('lock').disabled=false;$('lock').textContent='🔓 Khóa sáng';$('lock').className='sec';
     if(!running){running=true;draw()}
     try{wake=await navigator.wakeLock?.request('screen')}catch(e){}
-    say('');
+    refreshMics();say('Micro đang dùng: '+(stream.getAudioTracks()[0]?.label||'không rõ')+'.');
     if($('listen').checked)startSR();
-  }catch(e){say('Không mở được camera/micro: '+(e.message||e.name)+'. Trang cần chạy qua HTTPS và được cấp quyền.')}
+  }catch(e){if(e.name==='OverconstrainedError')$('mic').value='';say('Không mở được camera/micro: '+(e.message||e.name)+'. Trang cần chạy qua HTTPS và được cấp quyền.')}
 }
 let actx=null,an=null,silOn=false,lastLoud=0,silTimer=null,buf=null;
 function setupAudio(){
@@ -327,6 +328,24 @@ async function setLock(on){
   $('lock').className=lockOn?'on':'sec';
 }
 $('lock').onclick=()=>setLock(!lockOn);
+async function refreshMics(){
+  try{
+    const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audioinput');
+    const cur=stream&&stream.getAudioTracks()[0]?stream.getAudioTracks()[0].getSettings().deviceId:'';
+    const sel=$('mic'),keep=sel.value||cur||'';
+    sel.innerHTML='<option value="">Mặc định của máy</option>';
+    devs.forEach((d,i)=>{
+      if(d.deviceId==='default'||d.deviceId==='communications')return;
+      const o=document.createElement('option');o.value=d.deviceId;o.textContent=d.label||('Micro '+(i+1));sel.appendChild(o);
+    });
+    sel.value=[...sel.options].some(o=>o.value===keep)?keep:'';
+  }catch(e){}
+}
+$('mic').onchange=()=>{
+  if(live){say('Hãy dừng quay trước khi đổi micro.');refreshMics();return}
+  if(stream)openCam();
+};
+if(navigator.mediaDevices&&navigator.mediaDevices.addEventListener)navigator.mediaDevices.addEventListener('devicechange',()=>{if(stream)refreshMics()});
 $('start').onclick=openCam;
 $('flip').onclick=()=>{if(live){say('Hãy dừng quay trước khi đổi camera.');return}facing=facing==='user'?'environment':'user';openCam()};
 
