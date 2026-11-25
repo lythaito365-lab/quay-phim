@@ -336,7 +336,7 @@ $('rb').onclick=()=>{
     let src=stream;
     fromCanvas=$('burn').checked||bgOn||ttOn;
     if(fromCanvas){src=rc.captureStream(30);stream.getAudioTracks().forEach(t=>src.addTrack(t))}
-    const mt=['video/mp4;codecs=avc1','video/webm;codecs=vp9,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m))||'';
+    const mt=['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4;codecs=avc1,mp4a.40.2','video/mp4;codecs=avc1','video/webm;codecs=vp9,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m))||'';
     rec=new MediaRecorder(src,mt?{mimeType:mt}:{});
     rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
     rec.onstop=()=>{blobOut=new Blob(chunks,{type:rec.mimeType||'video/webm'});$('dl').disabled=false;say('Đã quay xong, bấm "Lưu video".')};
